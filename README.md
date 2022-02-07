@@ -1,19 +1,18 @@
 <div align="center">
 
-# Folder Upload Bot
+# File/Folder Upload Bot
 
 </div>
 
 <div align="justify">
 
-A dead simple Telegram bot to upload files inside your local directory to
-Telegram chat. Can be used as a backup helper. Originally, I created this bot to
-automate backing up my files to Telegram while I change or reinstall my Linux
-distro. For example, if you have a directory of videos, you can use this bot to
-upload them for you. With some slight modifications, you can make it upload as
-you want. With a
-[local bot API server](https://github.com/tdlib/telegram-bot-api) you can also
-make it support files upto 2GB in size.
+A dead simple Telegram bot to upload your local files by file path or folder
+path. Can be used as a backup helper. Originally, I created this bot to automate
+backing up my files to Telegram while I change or reinstall my Linux distro. For
+example, if you have a directory of videos, you can use this bot to upload them
+for you. With some slight modifications, you can make it upload as you want.
+With a [local bot API server](https://github.com/tdlib/telegram-bot-api) you can
+also make it support files upto 2GB in size.
 
 </div>
 
@@ -65,7 +64,7 @@ deno run --allow-net --allow-read --allow-env bot.ts
 - `--allow-read`: To read files from your machine.
 
 If you have everything done right, your bot should be running, and you should
-see a message `"Bot started"` in your console.
+see a message `"<bot_username> started."` in your console.
 
 But if you're still having issues, please open an issue
-[here](https://github.com/dcdunkan/folder-upload-bot/issues) :)
+[here](https://github.com/dcdunkan/file-upload-bot/issues) :)
