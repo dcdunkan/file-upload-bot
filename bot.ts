@@ -1,7 +1,11 @@
 import "https://deno.land/x/dotenv@v3.2.0/load.ts";
 import { Bot, InputFile } from "https://deno.land/x/grammy@v1.7.0/mod.ts";
 import { basename, join } from "https://deno.land/std@0.125.0/path/mod.ts";
-import { prettyBytes } from "https://deno.land/std@0.125.0/fmt/bytes.ts";
+import { prettyBytes as bytes } from "https://deno.land/std@0.125.0/fmt/bytes.ts";
+
+// 20 messages per minute to same group. 60000 / 20 = 3000
+const GROUP_WAITING_TIME = 3000; // 3 seconds delay.
+const PRIVATE_WAITING_TIME = 100; // 1/10 second delay.
 
 const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "";
 const ADMIN_ID = parseInt(Deno.env.get("ADMIN_ID") as string);
@@ -26,10 +30,38 @@ bot.command("start", async (ctx) => {
   );
 });
 
-bot.command("upload", async (ctx, next) => {
-  if (!ctx.match) return await ctx.reply("Please provide a file/folder path.");
+interface UploadedFileList {
+  name: string;
+  link: string;
+}
 
-  const path = ctx.match as string;
+bot.command(["upload", "to"], async (ctx) => {
+  if (!ctx.match) {
+    return await ctx.reply(
+      "Please provide a file/folder path." +
+        "\nSyntax: /upload <path>" +
+        "\nSyntax: /to <target chat id> <path>",
+    );
+  }
+
+  let path = ctx.match as string;
+  if (ctx.message?.text?.startsWith("/to")) {
+    if (path.split(" ").length < 2) {
+      return await ctx.reply(
+        "Please provide a file/folder path and the destination." +
+          "\nSyntax: /to <chat id> <file path>",
+      );
+    }
+    ctx.chat.id = parseInt(path.split(" ")[0]);
+    await ctx.api.getChat(ctx.chat.id).catch(async () => {
+      return await ctx.reply(
+        `Could'nt find the target chat ${ctx.chat.id}.` +
+          `\nMake sure the chat exists and the bot has permission to send messages to it.`,
+      );
+    });
+    path = path.split(" ").slice(1).join(" ");
+  }
+
   const { message_id } = await ctx.reply("Reading path...");
 
   const exists = await fileExists(path);
@@ -41,14 +73,16 @@ bot.command("upload", async (ctx, next) => {
     await ctx.api.editMessageText(
       ctx.chat.id,
       message_id,
-      `Uploading <code>${filename}</code> from <code>${path}</code>`,
+      `Uploading <code>${sanitize(filename)}</code> from <code>${
+        sanitize(path)
+      }</code>`,
       { parse_mode: "HTML" },
     );
 
     await ctx.replyWithDocument(new InputFile(path, filename), {
-      caption: `Filename: <code>${filename}</code>` +
-        `\nPath: <code>${path}</code>` +
-        `\nSize: ${prettyBytes(exists.size)}` +
+      caption: `Filename: <code>${sanitize(filename)}</code>` +
+        `\nPath: <code>${sanitize(path)}</code>` +
+        `\nSize: ${bytes(exists.size)}` +
         `\nCreated at: <code>${exists.birthtime?.toUTCString()}</code>`,
       parse_mode: "HTML",
     });
@@ -56,73 +90,130 @@ bot.command("upload", async (ctx, next) => {
     return await ctx.api.deleteMessage(ctx.chat.id, message_id);
   }
 
+  // Directory upload.
   const files = await getFileList(path);
   if (files.length === 0) return await ctx.reply("No files found.");
 
   await ctx.api.editMessageText(
     ctx.chat.id,
     message_id,
-    `Uploading ${files.length} file${
-      files.length > 1 ? "s" : ""
-    } from <code>${path}</code>`,
+    `Uploading ${files.length} file${files.length > 1 ? "s" : ""} from <code>${
+      sanitize(path)
+    }</code>`,
     { parse_mode: "HTML" },
   );
 
-  await ctx.pinChatMessage(message_id, {
-    disable_notification: true,
-  });
+  await ctx
+    .pinChatMessage(message_id, { disable_notification: true })
+    .catch((e) => e);
 
-  // Ready for another job! I am not sure if this is a good practice or not.
-  await next();
+  const uploadedFiles: UploadedFileList[] = [];
+
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
 
     // Double check.
     if (!await fileExists(file.path)) {
       await ctx.reply(
-        `'<code>${file.name}</code>' not found. Skipping.\nPath: <code>${file.path}</code>`,
+        `'<code>${
+          sanitize(file.name)
+        }</code>' not found. Skipping.\nPath: <code>${
+          sanitize(file.path)
+        }</code>`,
         { parse_mode: "HTML" },
       );
       continue;
     }
 
     // Update progress message.
-    await ctx.api.editMessageText(
-      ctx.chat.id,
-      message_id,
-      `Uploading [${i + 1}/${files.length}] <code>${
-        files[i].name
-      }</code> from <code>${path}</code>`,
-      { parse_mode: "HTML" },
-    );
+    if (ctx.chat.type === "private") {
+      await ctx.api.editMessageText(
+        ctx.chat.id,
+        message_id,
+        `📤 [${i + 1}/${files.length}] <code>${
+          sanitize(files[i].name)
+        }</code> from <code>${sanitize(path)}</code>`,
+        { parse_mode: "HTML" },
+      );
+    }
 
     try {
-      await ctx.replyWithDocument(new InputFile(file.path, file.name), {
-        caption: `Filename: <code>${file.name}</code>` +
-          `\nPath: <code>${file.path}</code>` +
-          `\nSize: ${prettyBytes(file.size)}` +
-          `\nCreated at: <code>${file.created_at}</code>`,
-        parse_mode: "HTML",
-      });
+      const { message_id: fileMsgId } = await ctx.replyWithDocument(
+        new InputFile(file.path, file.name),
+        {
+          caption: `Filename: <code>${sanitize(file.name)}</code>` +
+            `\nPath: <code>${sanitize(file.path)}</code>` +
+            `\nSize: ${bytes(file.size)}` +
+            `\nCreated at: <code>${file.created_at}</code>`,
+          parse_mode: "HTML",
+        },
+      );
+
+      // Why not private? There's no such link to messages in private chats.
+      if (ctx.chat.type !== "private") {
+        uploadedFiles.push({
+          name: sanitize(file.name),
+          link: `https://t.me/c/${
+            ctx.chat.id.toString().substring(4)
+          }/${fileMsgId}`,
+        });
+      }
       // Pause for a bit.
-      await pause(200);
+      await pause(ctx.chat.type);
     } catch (error) {
-      await ctx.reply(`Failed to upload <code>${file.name}</code>.`);
+      await ctx.reply(`Failed to upload <code>${sanitize(file.name)}</code>.`);
+      await pause(ctx.chat.type);
       console.error(error);
       continue;
     }
   }
 
   await ctx.api.editMessageText(ctx.chat.id, message_id, "Uploaded!");
-  await ctx.unpinChatMessage(message_id);
+  await ctx.unpinChatMessage(message_id).catch((e) => e);
 
   await ctx.reply(
     `<b>Successfully uploaded ${files.length} file${
       files.length > 1 ? "s" : ""
-    } from</b> <code>${path}</code>`,
+    } from</b> <code>${sanitize(path)}</code>`,
     { parse_mode: "HTML" },
   );
+
+  if (uploadedFiles.length < 1) return;
+  const indexMessages = createIndexMessages(uploadedFiles);
+  console.log(indexMessages);
+
+  for (let i = 0; i < indexMessages.length; i++) {
+    const { message_id: idxMsgId } = await ctx.reply(
+      indexMessages[i],
+      { parse_mode: "HTML" },
+    );
+    await pause(ctx.chat.type);
+    if (i !== 0) continue;
+    await ctx.api.editMessageText(
+      ctx.chat.id,
+      message_id,
+      `Uploaded! <a href="https://t.me/c/${
+        ctx.chat.id.toString().substring(4)
+      }/${idxMsgId}">See index</a>`,
+      { parse_mode: "HTML" },
+    );
+  }
 });
+
+function createIndexMessages(fileList: UploadedFileList[]): string[] {
+  const messages: string[] = [""];
+  let index = 0;
+  for (const file of fileList) {
+    const text = `\n- ${file.name}`;
+    const length = messages[index].length + text.length;
+
+    if (length > 4096) index++;
+
+    if (messages[index] === undefined) messages[index] = "";
+    messages[index] += `\n- <a href="${file.link}">${file.name}</a>`;
+  }
+  return messages;
+}
 
 interface FileList {
   name: string;
@@ -131,7 +222,7 @@ interface FileList {
   created_at: string;
 }
 
-async function getFileList(path: string) {
+async function getFileList(path: string): Promise<FileList[]> {
   const files: FileList[] = [];
   for await (const file of Deno.readDir(path)) {
     if (file.isDirectory) {
@@ -157,7 +248,7 @@ async function getFileList(path: string) {
   return files;
 }
 
-async function fileExists(name: string) {
+async function fileExists(name: string): Promise<Deno.FileInfo | false> {
   try {
     return await Deno.stat(name);
   } catch (error) {
@@ -167,9 +258,22 @@ async function fileExists(name: string) {
   }
 }
 
-function pause(ms: number) {
+function pause(
+  chatType: "channel" | "group" | "private" | "supergroup",
+): Promise<void> {
+  const ms = chatType === "private" ? PRIVATE_WAITING_TIME : GROUP_WAITING_TIME;
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function sanitize(html: string): string {
+  return html
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/&/g, "&amp;");
+}
+
 bot.catch(console.error);
-bot.start({ onStart: ({ username }) => console.log(`${username} started.`) });
+bot.start({
+  drop_pending_updates: true,
+  onStart: ({ username }) => console.log(`${username} started.`),
+});
