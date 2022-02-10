@@ -22,12 +22,19 @@ also make it support files upto 2GB in size.
 
 ### Demo usage preview
 
+<div align="left">
+
+It's a bit older preview, but it still almost the same thing. The command
+`/folder` has been changed to `/upload` after adding the support for both files
+and folders.</div>
+
 <img src="preview.gif" width="90%"><br>
-<sup>*It's a bit older preview, but it still almost the same thing</sup>
 
 </div>
 
-- [ ] It would be cool to have index messages of the uploaded files.
+- [x] It would be cool to have index messages of the uploaded files. (in groups
+      and channels)
+- [ ] ZIP/RAR/TAR support?
 
 ## Setup
 
