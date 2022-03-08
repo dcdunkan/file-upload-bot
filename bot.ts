@@ -1,11 +1,11 @@
 import "https://deno.land/x/dotenv@v3.2.0/load.ts";
 import { Bot, InputFile } from "https://deno.land/x/grammy@v1.7.0/mod.ts";
-import { basename, join } from "https://deno.land/std@0.125.0/path/mod.ts";
-import { prettyBytes as bytes } from "https://deno.land/std@0.125.0/fmt/bytes.ts";
+import { basename, join } from "https://deno.land/std@0.128.0/path/mod.ts";
+import { prettyBytes as bytes } from "https://deno.land/std@0.128.0/fmt/bytes.ts";
 
 // 20 messages per minute to same group. 60000 / 20 = 3000
 const GROUP_WAITING_TIME = 3000; // 3 seconds delay.
-const PRIVATE_WAITING_TIME = 100; // 1/10 second delay.
+const PRIVATE_WAITING_TIME = 25; // A small delay.
 
 const BOT_TOKEN = Deno.env.get("BOT_TOKEN") ?? "";
 const ADMIN_ID = parseInt(Deno.env.get("ADMIN_ID") as string);
@@ -27,6 +27,7 @@ bot.command("start", async (ctx) => {
       "\nExamples: /upload /home/user/Pictures/" +
       "\nOr /upload /home/user/Pictures/image.jpg" +
       "\n\nRepository: github.com/dcdunkan/file-upload-bot",
+    { disable_web_page_preview: true },
   );
 });
 
@@ -154,7 +155,9 @@ bot.command(["upload", "to"], async (ctx) => {
         uploadedFiles.push({
           name: sanitize(file.name),
           link: `https://t.me/c/${
-            ctx.chat.id.toString().substring(4)
+            ctx.chat.id.toString().startsWith("-100")
+              ? ctx.chat.id.toString().substring(4)
+              : ctx.chat.id
           }/${fileMsgId}`,
         });
       }
@@ -180,7 +183,6 @@ bot.command(["upload", "to"], async (ctx) => {
 
   if (uploadedFiles.length < 1) return;
   const indexMessages = createIndexMessages(uploadedFiles);
-  console.log(indexMessages);
 
   for (let i = 0; i < indexMessages.length; i++) {
     const { message_id: idxMsgId } = await ctx.reply(
@@ -193,7 +195,9 @@ bot.command(["upload", "to"], async (ctx) => {
       ctx.chat.id,
       message_id,
       `Uploaded! <a href="https://t.me/c/${
-        ctx.chat.id.toString().substring(4)
+        ctx.chat.id.toString().startsWith("-100")
+          ? ctx.chat.id.toString().substring(4)
+          : ctx.chat.id
       }/${idxMsgId}">See index</a>`,
       { parse_mode: "HTML" },
     );
@@ -203,14 +207,15 @@ bot.command(["upload", "to"], async (ctx) => {
 function createIndexMessages(fileList: UploadedFileList[]): string[] {
   const messages: string[] = [""];
   let index = 0;
-  for (const file of fileList) {
-    const text = `\n- ${file.name}`;
+  for (let i = 0; i < fileList.length; i++) {
+    const file = fileList[i];
+    const text = `\n${i + 1}. ${file.name}`;
     const length = messages[index].length + text.length;
 
     if (length > 4096) index++;
 
     if (messages[index] === undefined) messages[index] = "";
-    messages[index] += `\n- <a href="${file.link}">${file.name}</a>`;
+    messages[index] += `\n${i + 1}. <a href="${file.link}">${file.name}</a>`;
   }
   return messages;
 }
