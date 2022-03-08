@@ -230,6 +230,7 @@ interface FileList {
 async function getFileList(path: string): Promise<FileList[]> {
   const files: FileList[] = [];
   for await (const file of Deno.readDir(path)) {
+    if (file.name === ".git") continue;
     if (file.isDirectory) {
       const children = await getFileList(join(path, file.name));
       files.push(...children);
@@ -250,7 +251,12 @@ async function getFileList(path: string): Promise<FileList[]> {
       });
     }
   }
-  return files;
+
+  return files.sort((a, b) => {
+    if (a.path > b.path) return 1;
+    if (b.path > a.path) return -1;
+    return 0;
+  });
 }
 
 async function fileExists(name: string): Promise<Deno.FileInfo | false> {
